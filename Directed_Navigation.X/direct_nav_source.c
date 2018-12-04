@@ -7,13 +7,15 @@
 
 
 #include "xc.h"
+#define FCY 4000000UL
+#include <libpic30.h>
 
 #pragma config FNOSC = FRC       // 8 MHz FRC oscillator
 
-#define DIR1 _LATB9
-#define DIR2 _LATB12
-#define BUMP1 _LATB7
-#define BUMP2 _LATB8
+#define DIR1 _LATB12
+#define DIR2 _LATB9
+#define BUMP1 _RB7
+#define BUMP2 _RB8
 int CENTER = 3;
 int RIGHT = 4;
 int LEFT = 2;
@@ -21,18 +23,17 @@ int LEFT = 2;
 int steps_taken = 0;
 int time = 0;
 
-void delay(int cycles) {
-    int k = 0;
-    while(k < cycles) {
-        k++;
-    }
-}
-
 void config_ad()
 {
-    _TRISB4 = 1;		// TRISA/B, pg. 45 datasheet
-    _ANSB4 = 1;			// ANSA/B, pg. 136-137
-    _CSS15 = 1;			// AD1CSSH/L, pg. 217
+    // Pin 9 (IR Sensor)
+    _TRISA2 = 1;		// TRISA/B, pg. 45 datasheet
+    _ANSA2 = 1;			// ANSA/B, pg. 136-137
+    _CSS13 = 1;			// AD1CSSH/L, pg. 217
+    
+    // Pin 8 (Phototransistor)
+    _TRISA3 = 1;		// TRISA/B, pg. 45 datasheet
+    _ANSA3 = 1;			// ANSA/B, pg. 136-137
+    _CSS14 = 1;			// AD1CSSH/L, pg. 217
  
 
 
@@ -75,22 +76,22 @@ void config_ad()
 	/*** Select Interrupt Rate ***/
 	// interrupt rate should reflect number of analog channels used, e.g. if 
     // 5 channels, interrupt every 5th sample
-	_SMPI = 0b00001;		// AD1CON2<6:2>
+	_SMPI = 0b00010;		// AD1CON2<6:2>
 
 
 	/*** Turn on A/D Module ***/
 	_ADON = 1;			// AD1CON1<15>
 }
 
-void timer_config(void) {
+void timer1config(void) {
     // Configure Timer1
-    _TON = 1;           // Turn on Timer1
-    _TCS = 0;           // Select internal clock as source for
+    T1CONbits.TON = 1;           // Turn on Timer1
+    T1CONbits.TCS = 0;           // Select internal clock as source for
                         // Timer1 (this means that it will use
                         // the internal oscillator that runs at
                         // Fosc with instructions being executed
                         // at a rate of Fcy = Fosc/2)
-    _TCKPS = 0b11;      // Divide-by-64 prescaling for Timer1
+    T1CONbits.TCKPS = 0b11;      // Divide-by-64 prescaling for Timer1
                         // (although the timer would normally
                         // increment at a rate of Fcy, this setting
                         // causes it to be incremented at a rate
@@ -135,9 +136,20 @@ void __attribute__((interrupt, no_auto_psv)) _T1Interrupt(void)
     time = 1;
 }
 
+void timer2config() {
+    //_RCDIV = 0;
+    // Configure Timer1
+    T2CONbits.TON = 1;       // Turn Timer2 on
+    T2CONbits.TCKPS = 0b01;  // 1:8 prescaling
+    T2CONbits.TCS = 0;       // Internal clock source (FOSC/2)
+    TMR2 = 0;       // Reset Timer1
+}
+
+
 int main(void) {
     
-    timer_config();
+    timer1config();
+    timer2config();
     _TRISA0 = 0;
     _ANSA0 = 0;
     config_ad();
@@ -145,9 +157,10 @@ int main(void) {
     // configure i/o
     _TRISB12 = 0; // pins 15, 13 connected to motor direction
     _TRISB9 = 0;
+//    _TRISB7 = 1; // Bump Sensor (pin 11)
+//    _TRISB8 = 1; // Bump Sensor (pin 12)
     // Turn off analog
     _ANSB12 = 0;
-    _TRISB7 = 0;
    
      // Configure OC1
     // Clear control bits initially
@@ -182,18 +195,83 @@ int main(void) {
     _OC1IE = 1; // Enable Interrupt
     _OC1IF = 0; // Clear interrupt flag (IFS1 register)
     
-     int p_diode_v = ADC1BUF15;
+    // Clear control bits initially
+    OC2CON1 = 0;
+    OC2CON2 = 0;
+   
+    // Set period and duty cycle
+    OC2R = 500;                // Set Output Compare value to achieve
+                                // desired duty cycle. This is the number
+                                // of timer counts when the OC should send
+                                // the PWM signal low. The duty cycle as a
+                                // fraction is OC1R/OC1RS.
+    OC2RS = 9999;               // Period of OC1 to achieve desired PWM 
+                                // frequency, FPWM. See Equation 15-1
+                                // in the datasheet. For example, for
+                                // FPWM = 1 kHz, OC1RS = 3999. The OC1RS 
+                                // register contains the period when the
+                                // SYNCSEL bits are set to 0x1F (see FRM)
+    
+    // Configure OC1
+    OC2CON1bits.OCTSEL = 0b000; // System (peripheral) clock as timing source
+    OC2CON2bits.SYNCSEL = 0x1F; // Select OC1 as synchronization source
+                                // (self synchronization) -- Although we
+                                // selected the system clock to determine
+                                // the rate at which the PWM timer increments,
+                                // we could have selected a different source
+                                // to determine when each PWM cycle initiates.
+                                // From the FRM: When the SYNCSEL<4:0> bits
+                                // (OCxCON2<4:0>) = 0b11111, they make the
+                                // timer reset when it reaches the value of
+                                // OCxRS, making the OCx module use its
+                                // own Sync signal.
+    OC2CON2bits.OCTRIG = 0;     // Synchronizes with OC1 source instead of
+                                // triggering with the OC1 source
+    OC2CON1bits.OCM = 0b110;    // Edge-aligned PWM mode
+    
+     int ir_sensor = ADC1BUF13;
+     //int p_diode_v = ADC1BUF14;
+     int p_diode_v = 0;
      
-    while(p_diode_v < 300) {
-        OC1R = 6000;
-        DIR1 = 0;
-        DIR2 = 0;
+    OC1R = 6000;
+    DIR1 = 0;
+    DIR2 = 0;
+    while(ir_sensor <= 1700) {
+        ir_sensor = ADC1BUF13;
     }
-     DIR1 = 1;
+     steps_taken = 0;
+     while(steps_taken < 325){}
      
-     while(BUMP1 == 0 || BUMP2 == 0) {}
+     DIR2 = 1;
+     steps_taken = 0;
      
+     while(steps_taken <= 2500) {}
+//     while(BUMP1 == 1 || BUMP2 == 1) {}
      OC1R = 0;
+     
+     int num_balls = 0;
+     while (1)
+     {
+         OC2R = 500;
+         __delay_ms(1000);
+         OC2R = 750;
+         __delay_ms(1000);
+         OC2R = 500;
+         __delay_ms(1000);
+         OC2R = 250;
+         __delay_ms(1000);
+//         p_diode_v = ADC1BUF14;
+//         if (p_diode_v <= 3000) {
+//            OC2R = 500;
+//        }
+//        else if (p_diode_v <= 3500) {
+//            OC2R = 750;
+//        }
+//        else {
+//            OC2R = 250;
+//        }
+     }
+     
     
     int at_middle = 0;
     int position = CENTER;
@@ -220,10 +298,11 @@ int main(void) {
     
     while (1)
      {
-        p_diode_v = ADC1BUF15;
+        ir_sensor = ADC1BUF15;
         steps_taken = 0;
         
-        if (p_diode_v >= 300) //originally 1861
+        
+        if (ir_sensor >= 300) //originally 1861
         {
             
             OC1R = 0;

@@ -15,16 +15,16 @@
 
 void config_pwm() {
     // Clear control bits initially
-    OC1CON1 = 0;
-    OC1CON2 = 0;
+    OC2CON1 = 0;
+    OC2CON2 = 0;
    
     // Set period and duty cycle
-    OC1R = 5500;                // Set Output Compare value to achieve
+    OC2R = 8000;                // Set Output Compare value to achieve
                                 // desired duty cycle. This is the number
                                 // of timer counts when the OC should send
                                 // the PWM signal low. The duty cycle as a
                                 // fraction is OC1R/OC1RS.
-    OC1RS = 39999;               // Period of OC1 to achieve desired PWM 
+    OC2RS = 39999;               // Period of OC1 to achieve desired PWM 
                                 // frequency, FPWM. See Equation 15-1
                                 // in the datasheet. For example, for
                                 // FPWM = 1 kHz, OC1RS = 3999. The OC1RS 
@@ -32,8 +32,8 @@ void config_pwm() {
                                 // SYNCSEL bits are set to 0x1F (see FRM)
     
     // Configure OC1
-    OC1CON1bits.OCTSEL = 0b111; // System (peripheral) clock as timing source
-    OC1CON2bits.SYNCSEL = 0x1F; // Select OC1 as synchronization source
+    OC2CON1bits.OCTSEL = 0b111; // System (peripheral) clock as timing source
+    OC2CON2bits.SYNCSEL = 0x1F; // Select OC1 as synchronization source
                                 // (self synchronization) -- Although we
                                 // selected the system clock to determine
                                 // the rate at which the PWM timer increments,
@@ -44,16 +44,16 @@ void config_pwm() {
                                 // timer reset when it reaches the value of
                                 // OCxRS, making the OCx module use its
                                 // own Sync signal.
-    OC1CON2bits.OCTRIG = 0;     // Synchronizes with OC1 source instead of
+    OC2CON2bits.OCTRIG = 0;     // Synchronizes with OC1 source instead of
                                 // triggering with the OC1 source
-    OC1CON1bits.OCM = 0b110;    // Edge-aligned PWM mode
+    OC2CON1bits.OCM = 0b110;    // Edge-aligned PWM mode
 }
 
 void config_ad()
 {
-    _TRISB4 = 1;		// TRISA/B, pg. 45 datasheet
-    _ANSB4 = 1;			// ANSA/B, pg. 136-137
-    _CSS15 = 1;			// AD1CSSH/L, pg. 217
+    _TRISA3 = 1;		// TRISA/B, pg. 45 datasheet
+    _ANSA3 = 1;			// ANSA/B, pg. 136-137
+    _CSS14 = 1;			// AD1CSSH/L, pg. 217
  
 
 
@@ -109,35 +109,24 @@ int main(void) {
     
     while (1)
      {
-        int p_diode_v = ADC1BUF15;
+//        int p_diode_v = ADC1BUF14;
+
+//        if (p_diode_v <= 1000) {
+//            OC2R = 5500;
+//        }                                      
+//        else if (p_diode_v <= 2750) {     // Black ball
+//            OC2R = 4000;
+//        }
+//        else {                            // White ball
+//            OC2R = 7000;
+//        }
         
-        /*
-        if (p_diode_v >= 2000) //originally 1861
-        {
-            OC1R = 7000;
-            __delay_ms(100);
-            OC1R = 5500;
-        
-        }
-        else if (p_diode_v >= 1000) {
-            OC1R = 4000;
-            __delay_ms(100);
-            OC1R = 5500;
-        }
-        else 
-        {
-            OC1R = 5500;
-        }
-        */
-        if (p_diode_v <= 500) {
-            OC1R = 5500;
-        }
-        else if (p_diode_v <= 2750) {
-            OC1R = 4000;
-        }
-        else {
-            OC1R = 7000;
-        }
+//        OC2R = 4000;
+//        __delay_ms(1000);
+//        OC2R = 2000;
+//        __delay_ms(1000);
+//        OC2R = 4000;
+//        __delay_ms(1000);
      }
     
     return 0;
